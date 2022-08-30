@@ -35,8 +35,6 @@ app.post("/participants", (req, res) => {
         return res.sendStatus(422);
     }
 
-    const existingParticipants = participants.find(participant => participant.name === name);
-
     if (checkParticipant(name, participants)) {
         return res.sendStatus(409);
     }
