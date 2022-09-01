@@ -16,9 +16,6 @@ let db;
 const dbName = "live-chat";
 mongoClient.connect().then(() => db = mongoClient.db(dbName));
 
-let participants = [];
-const messages = [];
-
 app.post("/participants", async (req, res) => {
     const {name} = req.body;
 
@@ -77,7 +74,6 @@ function getTime(isFormated=false) {
 
 app.get("/participants", async (req, res) => {
     const dbResponse = await db.collection("participants").find().toArray();
-    console.log(dbResponse);
 
     try {
         res.send(dbResponse);
@@ -86,23 +82,27 @@ app.get("/participants", async (req, res) => {
     }
 });
 
-app.post("/messages", (req, res) => {
+app.post("/messages", async (req, res) => {
     const { to, text, type } = req.body;
     const { user } = req.headers;
 
-    if (!validateMessage(to, text, type) || !checkParticipant(user)) {
+    if (!validateMessage(to, text, type) || !await checkParticipant(user)) {
         return res.sendStatus(422);
     }
 
-    messages.push({
-        from: user,
-        to,
-        text,
-        type,
-        time: getTime(true)
-    });
-    
-    res.sendStatus(201);
+    try {
+        await db.collection("messages").insertOne({
+            from: user,
+            to,
+            text,
+            type,
+            time: getTime(true)
+        });
+        
+        res.sendStatus(201);        
+    } catch (error) {
+        res.status(400).send(error);       
+    }
 });
 
 function validateMessage(to, text, type) {
@@ -134,18 +134,28 @@ app.get("/messages", async (req, res) => {
     }
 });
 
-app.post("/status", (req, res) => {
+// TODO: Update document from DB
+app.post("/status", async (req, res) => {
     const { user } = req.headers;
 
-    if (!checkParticipant(user)) return res.sendStatus(404);
+    if (!await checkParticipant(user)) return res.sendStatus(404);
 
-    const userObj = participants.find(participant => participant.name === user);
-    userObj.lastStatus = getTime();
+    try {
+        await db.collection("participants").updateOne(
+            {name: user},
+            { $set: {lastStatus: getTime()} },
+            function (err, res) {}
+        );
 
-    res.sendStatus(200);
+        res.sendStatus(200);
+    } catch (error) {
+        res.status(400).send(error)
+    }
 });
 
-setInterval(() => {
+// TODO: Delete document from DB
+setInterval(async () => {
+    let participants = await db.collection("participants").find().toArray();
     participants = participants.filter(participant => {
         if (isAFK(participant)) {
             messages.push({
