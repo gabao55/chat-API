@@ -1,46 +1,70 @@
 import express from "express";
 import cors from "cors";
 import dayjs from "dayjs";
+import { MongoClient } from "mongodb";
+import dotenv from "dotenv";
+dotenv.config();
 
 const app = express();
 
 app.use(express.json());
 app.use(cors());
 
+const mongoClient = new MongoClient(process.env.MONGO_URI);
+
+let db;
+const dbName = "live-chat";
+mongoClient.connect().then(() => db = mongoClient.db(dbName));
+
 let participants = [];
 const messages = [];
 
-app.post("/participants", (req, res) => {
+app.post("/participants", async (req, res) => {
     const {name} = req.body;
 
     if (typeof(name) !== "string" || name === "") {
         return res.sendStatus(422);
     }
 
-    if (checkParticipant(name, participants)) {
+    if (await checkParticipant(name)) {
         return res.sendStatus(409);
     }
 
-    participants.push({ name, lastStatus: getTime() });
-    messages.push({
-        from: name,
-        to: "Todos",
-        text: "entra na sala...",
-        type: "status",
-        time: getTime(true)
-    });
+    try {
+        await db.collection("participants").insertOne({
+            name,
+            lastStatus: getTime()
+        })
+        await db.collection("messages").insertOne({
+            from: name,
+            to: "Todos",
+            text: "entra na sala...",
+            type: "status",
+            time: getTime(true)
+        });
 
-    res.sendStatus(201);
+        res.sendStatus(201);
+    } catch (error) {
+        res.send(error)
+    }
 });
 
-function checkParticipant(name, participants) {
-    const existingParticipants = participants.find(participant => participant.name === name);
-
-    if (existingParticipants) {
-        return true
+async function checkParticipant(name) {
+    const existingParticipant = await db.collection("participants").findOne({name});
+    let response;
+    
+    try {
+        if (existingParticipant !== null) {
+            response = true;
+        } else {
+            response = false;
+        }
+    } catch (error) {
+        console.log(error);
+        response = error;
     }
 
-    return false
+    return response;
 }
 
 function getTime(isFormated=false) {
@@ -51,15 +75,21 @@ function getTime(isFormated=false) {
     return now
 }
 
-app.get("/participants", (req, res) => {
-    res.send(participants);
+app.get("/participants", async (req, res) => {
+    const dbResponse = db.collection("participants").find().toArray();
+
+    try {
+        res.send(dbResponse);
+    } catch (error) {
+        res.send(error)
+    }
 });
 
 app.post("/messages", (req, res) => {
     const { to, text, type } = req.body;
     const { user } = req.headers;
 
-    if (!validateMessage(to, text, type) || !checkParticipant(user, participants)) {
+    if (!validateMessage(to, text, type) || !checkParticipant(user)) {
         return res.sendStatus(422);
     }
 
@@ -82,24 +112,31 @@ function validateMessage(to, text, type) {
     return true
 }
 
-app.get("/messages", (req, res) => {
+app.get("/messages", async (req, res) => {
     const {limit} = req.query;
     const { user } = req.headers;
 
-    const filteredMessages = messages.filter(message => message.to === user 
-        || message.to === "Todos"
-        || message.from === user);
+    const dbResponse = await db.collection("messages").find().toArray();
 
-    const lastMessages = limit ? filteredMessages.slice(-limit) : filteredMessages;
-    console.log(lastMessages);
+    try {
+        const dbMessages = dbResponse;
 
-    res.send(lastMessages);
+        const filteredMessages = dbMessages.filter(message => message.to === user 
+            || message.to === "Todos"
+            || message.from === user);
+    
+        const lastMessages = limit ? filteredMessages.slice(-limit) : filteredMessages;
+    
+        res.send(lastMessages);
+    } catch (error) {
+        res.send(error);
+    }
 });
 
 app.post("/status", (req, res) => {
     const { user } = req.headers;
 
-    if (!checkParticipant(user, participants)) return res.sendStatus(404);
+    if (!checkParticipant(user)) return res.sendStatus(404);
 
     const userObj = participants.find(participant => participant.name === user);
     userObj.lastStatus = getTime();
