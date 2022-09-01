@@ -76,7 +76,8 @@ function getTime(isFormated=false) {
 }
 
 app.get("/participants", async (req, res) => {
-    const dbResponse = db.collection("participants").find().toArray();
+    const dbResponse = await db.collection("participants").find().toArray();
+    console.log(dbResponse);
 
     try {
         res.send(dbResponse);
