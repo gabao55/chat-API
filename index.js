@@ -105,6 +105,8 @@ app.post("/messages", async (req, res) => {
     const { to, text, type } = req.body;
     const { user } = req.headers;
 
+    if (!await checkParticipant(user)) return res.sendStatus(422);
+
     try {
         await db.collection("messages").insertOne({
             from: user,
