@@ -3,6 +3,7 @@ import cors from "cors";
 import dayjs from "dayjs";
 import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
+import Joi from "joi";
 dotenv.config();
 
 const app = express();
@@ -16,12 +17,24 @@ let db;
 const dbName = "live-chat";
 mongoClient.connect().then(() => db = mongoClient.db(dbName));
 
-app.post("/participants", async (req, res) => {
-    const {name} = req.body;
+const participantSchema = Joi.object({
+    name: Joi.string().required().min(1)
+});
 
-    if (typeof(name) !== "string" || name === "") {
-        return res.sendStatus(422);
+const messageSchema = Joi.object({
+    to: Joi.string().required().min(1),
+    text: Joi.string().required().min(1),
+    type: Joi.string().required().valid("message", "private_message")
+});
+
+app.post("/participants", async (req, res) => {
+    const participantValidation = participantSchema.validate(req.body, { abortEarly: false });
+    if (participantValidation.error) {
+        const errors = participantValidation.error.details.map(error => error.message);
+        return res.status(422).send(errors);
     }
+
+    const {name} = req.body;
 
     if (await checkParticipant(name)) {
         return res.sendStatus(409);
@@ -42,15 +55,16 @@ app.post("/participants", async (req, res) => {
 
         res.sendStatus(201);
     } catch (error) {
-        res.send(error)
+        res.status(500).send(error)
     }
 });
 
 async function checkParticipant(name) {
-    const existingParticipant = await db.collection("participants").findOne({name});
     let response;
     
     try {
+        const existingParticipant = await db.collection("participants").findOne({name});
+
         if (existingParticipant !== null) {
             response = true;
         } else {
@@ -73,22 +87,23 @@ function getTime(isFormated=false) {
 }
 
 app.get("/participants", async (req, res) => {
-    const dbResponse = await db.collection("participants").find().toArray();
-
     try {
+        const dbResponse = await db.collection("participants").find().toArray();
         res.send(dbResponse);
     } catch (error) {
-        res.send(error)
+        res.status(500).send(error)
     }
 });
 
 app.post("/messages", async (req, res) => {
+    const messageValidation = messageSchema.validate(req.body, { abortEarly: false });
+    if (messageValidation.error) {
+        const errors = messageValidation.error.details.map(error => error.message);
+        return res.status(422).send(errors);
+    }
+
     const { to, text, type } = req.body;
     const { user } = req.headers;
-
-    if (!validateMessage(to, text, type) || !await checkParticipant(user)) {
-        return res.sendStatus(422);
-    }
 
     try {
         await db.collection("messages").insertOne({
@@ -101,26 +116,16 @@ app.post("/messages", async (req, res) => {
         
         res.sendStatus(201);        
     } catch (error) {
-        res.status(400).send(error);       
+        res.status(500).send(error);       
     }
 });
-
-function validateMessage(to, text, type) {
-    if (to === "" || text === "" || (type !== "message" && type !== "private_message")) {
-        return false
-    }
-
-    return true
-}
 
 app.get("/messages", async (req, res) => {
     const {limit} = req.query;
     const { user } = req.headers;
 
-    const dbResponse = await db.collection("messages").find().toArray();
-
     try {
-        const dbMessages = dbResponse;
+        const dbMessages = await db.collection("messages").find().toArray();
 
         const filteredMessages = dbMessages.filter(message => message.to === user 
             || message.to === "Todos"
@@ -130,11 +135,10 @@ app.get("/messages", async (req, res) => {
     
         res.send(lastMessages);
     } catch (error) {
-        res.send(error);
+        res.status(500).send(error);
     }
 });
 
-// TODO: Update document from DB
 app.post("/status", async (req, res) => {
     const { user } = req.headers;
 
@@ -149,28 +153,32 @@ app.post("/status", async (req, res) => {
 
         res.sendStatus(200);
     } catch (error) {
-        res.status(400).send(error)
+        res.status(500).send(error)
     }
 });
 
-// TODO: Delete document from DB
 setInterval(async () => {
-    let participants = await db.collection("participants").find().toArray();
-    participants = participants.filter(participant => {
-        if (isAFK(participant)) {
-            messages.push({
-                from: participant.name,
-                to: "Todos",
-                text: "sai da sala...",
-                type: "status",
-                time: getTime(true)
-            });
+    try {
+        const participants = await db.collection("participants").find().toArray();
 
-            return false
-        }
-
-        return true
-    });
+        participants.forEach(async participant => {
+            if (isAFK(participant)) {
+                await db.collection("participants").deleteOne({
+                    _id: participant._id
+                });
+                
+                await db.collection("messages").insertOne({
+                    from: participant.name,
+                    to: "Todos",
+                    text: "sai da sala...",
+                    type: "status",
+                    time: getTime(true)
+                })
+            }
+        });
+    } catch (error) {
+        console.log(error)
+    }
 }, 15000);
 
 function isAFK(user) {
