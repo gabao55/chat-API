@@ -174,13 +174,38 @@ app.delete("/messages/:messageId", async (req, res) => {
         return res.sendStatus(404);
     }
 
-    if (message.from !== user) {
-        return res.sendStatus(401);
-    }
+    if (message.from !== user) return res.sendStatus(401);
 
     await db.collection("messages").deleteOne({ _id: ObjectId(message._id) });
 
     res.sendStatus(200);    
+});
+
+app.put("/messages/:messageId", async (req, res) => {
+    const messageValidation = messageSchema.validate(req.body, { abortEarly: false });
+    if (messageValidation.error) {
+        const errors = messageValidation.error.details.map(error => error.message);
+        return res.status(422).send(errors);
+    }
+
+    const { user } = req.headers;
+    const messageId = req.params.messageId;
+
+    if (!await checkParticipant(user)) return res.sendStatus(422);
+
+    const message = await db.collection("messages").findOne({ _id: ObjectId(messageId) });
+    if (!message) {
+        return res.sendStatus(404);
+    }
+
+    if (message.from !== user) return res.sendStatus(401);
+
+    await db.collection("messages").updateOne(
+        { _id: ObjectId(message._id) },
+        { $set: req.body }
+    );
+
+    res.sendStatus(200);
 });
 
 setInterval(async () => {
