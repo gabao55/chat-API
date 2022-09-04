@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 import Joi from "joi";
+import { stripHtml } from "string-strip-html";
 dotenv.config();
 
 const app = express();
@@ -34,7 +35,7 @@ app.post("/participants", async (req, res) => {
         return res.status(422).send(errors);
     }
 
-    const {name} = req.body;
+    const name = stripHtml(req.body.name).result.trim();
 
     if (await checkParticipant(name)) {
         return res.sendStatus(409);
@@ -102,8 +103,13 @@ app.post("/messages", async (req, res) => {
         return res.status(422).send(errors);
     }
 
-    const { to, text, type } = req.body;
-    const { user } = req.headers;
+    let { to, text, type } = req.body;
+    let { user } = req.headers;
+
+    to = stripHtml(to).result.trim();
+    text = stripHtml(text).result.trim();
+    type = stripHtml(type).result.trim();
+    user = stripHtml(user).result.trim();
 
     if (!await checkParticipant(user)) return res.sendStatus(422);
 
@@ -144,13 +150,12 @@ app.get("/messages", async (req, res) => {
 app.post("/status", async (req, res) => {
     const { user } = req.headers;
 
-    if (!await checkParticipant(user)) return res.sendStatus(404);
-
     try {
+        if (!await checkParticipant(user)) return res.sendStatus(404);
+
         await db.collection("participants").updateOne(
             {name: user},
-            { $set: {lastStatus: getTime()} },
-            function (err, res) {}
+            { $set: {lastStatus: getTime()} }
         );
 
         res.sendStatus(200);
