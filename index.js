@@ -32,13 +32,15 @@ app.post("/participants", async (req, res) => {
     const participantValidation = participantSchema.validate(req.body, { abortEarly: false });
     if (participantValidation.error) {
         const errors = participantValidation.error.details.map(error => error.message);
-        return res.status(422).send(errors);
+        res.status(422).send(errors);
+        return;
     }
 
     const name = stripHtml(req.body.name).result.trim();
 
     if (await checkParticipant(name)) {
-        return res.sendStatus(409);
+        res.sendStatus(409);
+        return;
     }
 
     try {
@@ -58,6 +60,8 @@ app.post("/participants", async (req, res) => {
     } catch (error) {
         res.status(500).send(error)
     }
+
+    return;
 });
 
 async function checkParticipant(name) {
@@ -100,7 +104,8 @@ app.post("/messages", async (req, res) => {
     const messageValidation = messageSchema.validate(req.body, { abortEarly: false });
     if (messageValidation.error) {
         const errors = messageValidation.error.details.map(error => error.message);
-        return res.status(422).send(errors);
+        res.status(422).send(errors);
+        return;
     }
 
     let { to, text, type } = req.body;
@@ -111,7 +116,10 @@ app.post("/messages", async (req, res) => {
     type = stripHtml(type).result.trim();
     user = stripHtml(user).result.trim();
 
-    if (!await checkParticipant(user)) return res.sendStatus(422);
+    if (!await checkParticipant(user)) {
+        res.sendStatus(422);
+        return;
+    }
 
     try {
         await db.collection("messages").insertOne({
@@ -126,6 +134,8 @@ app.post("/messages", async (req, res) => {
     } catch (error) {
         res.status(500).send(error);       
     }
+
+    return;
 });
 
 app.get("/messages", async (req, res) => {
@@ -151,7 +161,10 @@ app.post("/status", async (req, res) => {
     const { user } = req.headers;
 
     try {
-        if (!await checkParticipant(user)) return res.sendStatus(404);
+        if (!await checkParticipant(user)) {
+            res.sendStatus(404);
+            return;
+        }
 
         await db.collection("participants").updateOne(
             {name: user},
@@ -162,6 +175,8 @@ app.post("/status", async (req, res) => {
     } catch (error) {
         res.status(500).send(error)
     }
+
+    return;
 });
 
 app.delete("/messages/:messageId", async (req, res) => {
@@ -171,34 +186,45 @@ app.delete("/messages/:messageId", async (req, res) => {
 
     const message = await db.collection("messages").findOne({ _id: ObjectId(messageId) });
     if (!message) {
-        return res.sendStatus(404);
+        res.sendStatus(404);
+        return;
     }
 
     if (message.from !== user) return res.sendStatus(401);
 
     await db.collection("messages").deleteOne({ _id: ObjectId(message._id) });
 
-    res.sendStatus(200);    
+    res.sendStatus(200);
+    
+    return;
 });
 
 app.put("/messages/:messageId", async (req, res) => {
     const messageValidation = messageSchema.validate(req.body, { abortEarly: false });
     if (messageValidation.error) {
         const errors = messageValidation.error.details.map(error => error.message);
-        return res.status(422).send(errors);
+        res.status(422).send(errors);
+        return;
     }
 
     const { user } = req.headers;
     const messageId = req.params.messageId;
 
-    if (!await checkParticipant(user)) return res.sendStatus(422);
+    if (!await checkParticipant(user)) {
+        res.sendStatus(422);
+        return;
+    }
 
     const message = await db.collection("messages").findOne({ _id: ObjectId(messageId) });
     if (!message) {
-        return res.sendStatus(404);
+        res.sendStatus(404);
+        return;
     }
 
-    if (message.from !== user) return res.sendStatus(401);
+    if (message.from !== user) {
+        res.sendStatus(401);
+        return;
+    }
 
     await db.collection("messages").updateOne(
         { _id: ObjectId(message._id) },
@@ -206,6 +232,8 @@ app.put("/messages/:messageId", async (req, res) => {
     );
 
     res.sendStatus(200);
+
+    return;
 });
 
 setInterval(async () => {
